@@ -1,0 +1,76 @@
+import pandas as pd
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+from model import ETAModel
+import torch.optim as optim
+import torch.nn as nn
+
+def train(epochs=50):
+    df = pd.read_csv('data.csv')
+    X = df[['distance']].values.astype('float32')
+    y = df['eta'].values.astype('float32')
+    dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(y.reshape(-1,1)))
+    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    model = ETAModel()
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+    for epoch in range(epochs):
+        for xb, yb in loader:
+            pred = model(xb)
+            loss = criterion(pred, yb)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        if (epoch+1) % 10 == 0:
+            print(f'Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}')
+
+    torch.save(model.state_dict(), 'eta_model.pth')
+    print("Saved eta_model.pth")
+
+if __name__ == '__main__':
+    train()
+
+
+import torch
+from model import ETAModel
+
+def predict_eta(distances):
+    model = ETAModel()
+    model.load_state_dict(torch.load('eta_model.pth'))
+    model.eval()
+    with torch.no_grad():
+        x = torch.tensor(distances, dtype=torch.float32).unsqueeze(1)
+        y = model(x).squeeze(1).numpy()
+    return y
+
+if __name__ == '__main__':
+    sample = [5.0, 10.0, 15.0]
+    etas = predict_eta(sample)
+    for d, e in zip(sample, etas):
+        print(f"Distance {d:.1f} km → ETA {e:.1f} units")
+
+
+from routing import optimize_route
+from predict import predict_eta
+
+def main():
+    # example coordinates
+    coords = [(0,0), (2,3), (5,1), (6,4)]
+    seq, total_dist = optimize_route(coords)
+    print("Route order:", seq)
+    # compute per-leg distances
+    legs = []
+    for i in range(len(seq)):
+        a = coords[seq[i]]
+        b = coords[seq[(i+1) % len(seq)]]
+        legs.append(((a[0]-b[0])**2 + (a[1]-b[1])**2)**0.5)
+
+    etas = predict_eta(legs)
+    print("Leg distances:", [f"{d:.2f}" for d in legs])
+    print("Leg ETAs:     ", [f"{e:.2f}" for e in etas])
+    print(f"Total ETA:    {sum(etas):.2f}")
+
+if __name__ == '__main__':
+    main()
